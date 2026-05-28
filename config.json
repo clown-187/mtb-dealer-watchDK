@@ -1,0 +1,96 @@
+{
+  "_info": "Rediger denne fil for at tilpasse agenten. Du behoever ikke roere nogen anden fil.",
+
+  "filters": {
+    "min_price":        5000,
+    "max_price":        30000,
+    "min_discount_pct": 10,
+    "sizes":            ["L", "XL"],
+    "notify_unknown_size": true,
+    "exclude_emtb":     true,
+    "max_age_years":    3,
+    "max_per_run":      10
+  },
+
+  "dealers": [
+    {
+      "name": "Cykler.dk",
+      "type": "shopify",
+      "base_url": "https://www.cykler.dk",
+      "active": true
+    },
+    {
+      "name": "BikeWorld (Silkeborg)",
+      "type": "shopify",
+      "base_url": "https://www.bikeworld.dk",
+      "active": true
+    },
+    {
+      "name": "Heino Cykler (Brondby)",
+      "type": "shopify",
+      "base_url": "https://www.heino-cykler.dk",
+      "active": true
+    },
+    {
+      "name": "Bikestore.dk (Aarhus)",
+      "type": "shopify",
+      "base_url": "https://www.bikestore.dk",
+      "active": true
+    },
+    {
+      "name": "Spoke (Herning)",
+      "type": "shopify",
+      "base_url": "https://www.spoke.dk",
+      "active": true
+    },
+    {
+      "name": "B.O.C. (Flensborg)",
+      "type": "shopify",
+      "base_url": "https://www.boc24.de",
+      "active": true
+    },
+    {
+      "name": "Cykelpartner",
+      "type": "playwright",
+      "url": "https://www.cykelpartner.dk/mountainbike",
+      "active": true
+    },
+    {
+      "name": "Cykelexperten",
+      "type": "playwright",
+      "url": "https://cykelexperten.dk/cykler/mountainbike/",
+      "active": true
+    },
+    {
+      "name": "Cykelgear",
+      "type": "playwright",
+      "url": "https://cykelgear.dk/cykler/mountainbike",
+      "active": true
+    },
+    {
+      "name": "Design Cykler",
+      "type": "playwright",
+      "url": "https://designcykler.dk/shop/mountainbike-29/",
+      "active": true
+    },
+    {
+      "name": "Fri BikeStore",
+      "type": "playwright",
+      "url": "https://www.fribikestore.dk/mountainbike",
+      "active": true
+    },
+    {
+      "name": "Bike-Discount.de",
+      "type": "playwright",
+      "url": "https://www.bike-discount.de/mountainbike-s-10-p-0.html",
+      "active": false,
+      "_comment": "Saet active til true for at aktivere"
+    },
+    {
+      "name": "Bike24.com",
+      "type": "playwright",
+      "url": "https://www.bike24.com/c/mountainbikes",
+      "active": false
+    }
+  ]
+}

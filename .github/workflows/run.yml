@@ -1,0 +1,38 @@
+name: MTB Dealer Watch
+
+on:
+  schedule:
+    - cron: "15 * * * *"   # hver time
+  workflow_dispatch:        # manuel start
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Installer afhaengigheder
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Kør agent
+        run: python main.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Gem seen.json
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name  "GitHub Actions"
+          git add seen.json
+          git diff --cached --quiet || git commit -m "Update seen state [skip ci]"
+          git push
