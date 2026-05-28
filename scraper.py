@@ -1,6 +1,6 @@
 """
 Scraper med to strategier:
-  - shopify:    Henter products.json direkte (hurtig, ingen browser)
+  - shopify:    Henter products.json + specifikke sale-collections
   - playwright: Starter en rigtig browser, korer JS, finder produkter automatisk
 """
 
@@ -8,7 +8,6 @@ import asyncio
 import re
 import requests
 import urllib3
-from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -22,24 +21,18 @@ HEADERS = {
     "Accept-Language": "da-DK,da;q=0.9,en;q=0.8",
 }
 
-SHOPIFY_COLLECTIONS = [
-    "mountainbike", "mountain-bike", "mtb",
-    "cykler", "fahrraeder", "velos", "all",
-]
+DEFAULT_COLLECTIONS = ["mountainbike", "mountain-bike", "mtb", "cykler", "all"]
 
-# JavaScript der korer inde i browseren og finder produkter automatisk
 FIND_PRODUCTS_JS = """
 () => {
     const results = [];
     const priceRe = /\\d[\\d.,]+\\s*(kr\\.?|dkk|€|eur)/i;
     const seen = new Set();
 
-    // Find alle elementer med pris-lignende tekst
     document.querySelectorAll('*').forEach(el => {
         const own = (el.childNodes[0] || {}).textContent || '';
         if (!priceRe.test(own) || own.length > 60) return;
 
-        // Gaa op i DOM til vi finder container med heading + link
         let node = el;
         for (let i = 0; i < 6; i++) {
             node = node.parentElement;
@@ -50,21 +43,21 @@ FIND_PRODUCTS_JS = """
                 const url = a.href;
                 if (seen.has(url)) break;
                 seen.add(url);
-
-                // Find original pris (gennemstreget)
-                const crossed = node.querySelector('s, del, [class*="old"], [class*="was"], [class*="before"], [class*="original"], [class*="compare"]');
-
+                const crossed = node.querySelector(
+                    's, del, [class*="old"], [class*="was"], [class*="before"], ' +
+                    '[class*="original"], [class*="compare"], [class*="crossed"], ' +
+                    '[class*="regular"], [class*="Normal"]'
+                );
                 results.push({
-                    title:         h.innerText.trim().split('\\n')[0],
-                    price:         own.trim(),
+                    title:          h.innerText.trim().split('\\n')[0],
+                    price:          own.trim(),
                     original_price: crossed ? crossed.innerText.trim() : null,
-                    url:           url
+                    url:            url
                 });
                 break;
             }
         }
     });
-
     return results;
 }
 """
@@ -72,62 +65,84 @@ FIND_PRODUCTS_JS = """
 
 # ── Shopify JSON API ─────────────────────────────────────────────────────────
 
-def fetch_shopify(dealer):
-    base = dealer["base_url"].rstrip("/")
+def _shopify_products(base, collection, verify=True):
+    """Henter alle produkter fra en Shopify collection."""
     results = []
+    page = 1
+    while True:
+        url = f"{base}/collections/{collection}/products.json?limit=250&page={page}"
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=12, verify=verify)
+            if r.status_code != 200:
+                return results
+            products = r.json().get("products", [])
+            if not products:
+                return results
+            results += products
+            if len(products) < 250:
+                return results
+            page += 1
+        except Exception as e:
+            return results
+    return results
 
-    for collection in SHOPIFY_COLLECTIONS:
-        page, found = 1, False
-        while True:
-            url = f"{base}/collections/{collection}/products.json?limit=250&page={page}"
-            try:
-                r = requests.get(url, headers=HEADERS, timeout=12, verify=False)
-                if r.status_code != 200:
-                    break
-                products = r.json().get("products", [])
-                if not products:
-                    break
 
-                for p in products:
-                    title = p.get("title", "")
-                    variants = p.get("variants", [])
-                    if not variants:
-                        continue
+def fetch_shopify(dealer):
+    base    = dealer["base_url"].rstrip("/")
+    results = []
+    seen    = set()
 
-                    prices   = [float(v["price"]) for v in variants if v.get("price")]
-                    compares = [float(v["compare_at_price"]) for v in variants if v.get("compare_at_price")]
+    def add(products, from_sale_collection=False):
+        for p in products:
+            title    = p.get("title", "")
+            variants = p.get("variants", [])
+            if not variants:
+                continue
 
-                    if not prices:
-                        continue
+            prices   = [float(v["price"]) for v in variants if v.get("price")]
+            compares = [float(v["compare_at_price"]) for v in variants
+                        if v.get("compare_at_price") and float(v["compare_at_price"]) > 0]
 
-                    sale_price = min(prices)
-                    orig_price = max(compares) if compares else None
-                    on_sale    = orig_price and orig_price > sale_price
+            if not prices:
+                continue
 
-                    pct = int((orig_price - sale_price) / orig_price * 100) if on_sale else 0
+            sale_price = min(prices)
+            orig_price = max(compares) if compares else None
+            on_sale    = bool(orig_price and orig_price > sale_price)
+            pct        = int((orig_price - sale_price) / orig_price * 100) if on_sale else 0
 
-                    handle = p.get("handle", "")
-                    results.append({
-                        "dealer":       dealer["name"],
-                        "title":        title,
-                        "price":        sale_price,
-                        "orig_price":   orig_price,
-                        "discount_pct": pct,
-                        "on_sale":      bool(on_sale),
-                        "url":          f"{base}/products/{handle}",
-                    })
-                    found = True
+            # Varer fra sale-collection er på tilbud selvom compare_at_price mangler
+            if from_sale_collection and not on_sale:
+                on_sale = True
 
-                if len(products) < 250:
-                    break
-                page += 1
+            handle = p.get("handle", "")
+            url    = f"{base}/products/{handle}"
+            if url in seen:
+                continue
+            seen.add(url)
 
-            except Exception as e:
-                print(f"    Shopify fejl ({collection}): {e}")
-                break
+            results.append({
+                "dealer":       dealer["name"],
+                "title":        title,
+                "price":        sale_price,
+                "orig_price":   orig_price,
+                "discount_pct": pct,
+                "on_sale":      on_sale,
+                "url":          url,
+            })
 
-        if found:
-            break  # Fandt produkter i denne collection — stop
+    # 1) Standard collections — kun med eksplicit rabat
+    for col in DEFAULT_COLLECTIONS:
+        products = _shopify_products(base, col)
+        if products:
+            add(products, from_sale_collection=False)
+            break  # Stop ved første fungerende collection
+
+    # 2) Sale collections — returner alt herfra (selv uden compare_at_price)
+    for col in dealer.get("sale_collections", []):
+        products = _shopify_products(base, col)
+        if products:
+            add(products, from_sale_collection=True)
 
     return results
 
@@ -135,58 +150,74 @@ def fetch_shopify(dealer):
 # ── Playwright auto-discovery ────────────────────────────────────────────────
 
 def parse_price(text):
-    """'12.499 kr.' → 12499.0"""
-    cleaned = re.sub(r"[^\d,.]", "", text.replace(".", "").replace(",", "."))
-    try:
-        return float(cleaned)
-    except ValueError:
+    if not text:
         return None
+    cleaned = re.sub(r"[^\d]", "", text.replace(".", "").replace(",", ""))
+    return float(cleaned) if cleaned else None
+
+
+async def scrape_url(pw, url, dealer_name, is_sale_page=False):
+    results = []
+    browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
+    ctx     = await browser.new_context(
+        user_agent=HEADERS["User-Agent"],
+        locale="da-DK",
+        extra_http_headers={"Accept-Language": "da-DK,da;q=0.9"},
+    )
+    page = await ctx.new_page()
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        await page.wait_for_timeout(3000)
+        raw = await page.evaluate(FIND_PRODUCTS_JS)
+
+        for item in raw:
+            price = parse_price(item.get("price", ""))
+            orig  = parse_price(item.get("original_price"))
+            on_sale = bool(orig and orig > (price or 0))
+            pct     = int((orig - price) / orig * 100) if on_sale else 0
+
+            # Sider på sale-URL er per definition på tilbud
+            if is_sale_page and not on_sale:
+                on_sale = True
+
+            if not price:
+                continue
+
+            results.append({
+                "dealer":       dealer_name,
+                "title":        item["title"],
+                "price":        price,
+                "orig_price":   orig,
+                "discount_pct": pct,
+                "on_sale":      on_sale,
+                "url":          item["url"],
+            })
+    except Exception as e:
+        print(f"    Playwright fejl ({dealer_name}, {url}): {e}")
+    finally:
+        await browser.close()
+    return results
 
 
 async def fetch_playwright_async(dealer):
     results = []
-    url = dealer.get("url", "")
+    seen    = set()
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
-        ctx = await browser.new_context(
-            user_agent=HEADERS["User-Agent"],
-            locale="da-DK",
-            extra_http_headers={"Accept-Language": "da-DK,da;q=0.9"},
-        )
-        page = await ctx.new_page()
+        # Scrape primær URL
+        primary = await scrape_url(pw, dealer["url"], dealer["name"], is_sale_page=False)
+        for item in primary:
+            seen.add(item["url"])
+            results.append(item)
 
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-            # Vent paa at siden er naesten klar
-            await page.wait_for_timeout(3000)
-
-            raw = await page.evaluate(FIND_PRODUCTS_JS)
-
-            for item in raw:
-                price    = parse_price(item.get("price", ""))
-                orig_raw = item.get("original_price")
-                orig     = parse_price(orig_raw) if orig_raw else None
-                on_sale  = bool(orig and orig > (price or 0))
-                pct      = int((orig - price) / orig * 100) if on_sale else 0
-
-                if not price:
-                    continue
-
-                results.append({
-                    "dealer":       dealer["name"],
-                    "title":        item["title"],
-                    "price":        price,
-                    "orig_price":   orig,
-                    "discount_pct": pct,
-                    "on_sale":      on_sale,
-                    "url":          item["url"],
-                })
-
-        except Exception as e:
-            print(f"    Playwright fejl ({dealer['name']}): {e}")
-        finally:
-            await browser.close()
+        # Scrape sale-URL hvis defineret
+        sale_url = dealer.get("sale_url")
+        if sale_url:
+            sale = await scrape_url(pw, sale_url, dealer["name"], is_sale_page=True)
+            for item in sale:
+                if item["url"] not in seen:
+                    seen.add(item["url"])
+                    results.append(item)
 
     return results
 
@@ -202,20 +233,21 @@ def fetch_all(config):
     dealers = [d for d in config.get("dealers", []) if d.get("active", True)]
 
     for dealer in dealers:
-        name = dealer["name"]
+        name  = dealer["name"]
         dtype = dealer.get("type", "playwright")
-        print(f"  [{dtype}] {name}...")
+        sale_hint = f" + {len(dealer.get('sale_collections',[]))} sale-cols" if dealer.get("sale_collections") else ""
+        if dealer.get("sale_url"):
+            sale_hint = " + sale-URL"
+        print(f"  [{dtype}] {name}{sale_hint}...")
         try:
-            if dtype == "shopify":
-                data = fetch_shopify(dealer)
-            else:
-                data = fetch_playwright(dealer)
-            print(f"    -> {len(data)} produkter")
+            data = fetch_shopify(dealer) if dtype == "shopify" else fetch_playwright(dealer)
+            on_sale_count = sum(1 for d in data if d.get("on_sale"))
+            print(f"    -> {len(data)} produkter ({on_sale_count} på tilbud)")
             results += data
         except Exception as e:
             print(f"    -> FEJL: {e}")
 
-    # Dedupliker paa URL
+    # Dedupliker på URL
     seen, unique = set(), []
     for item in results:
         k = item.get("url", item.get("title", ""))

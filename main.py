@@ -25,7 +25,12 @@ def format_msg(item, reason):
     url   = item["url"]
 
     sz_line   = f"\nStr: {sz}" if sz else ""
-    orig_line = f"\nFoer: {fmt_price(orig)}  (-{pct}%)" if orig and pct else ""
+    if orig and pct:
+        orig_line = f"\nFoer: {fmt_price(orig)}  (-{pct}%)"
+    elif orig:
+        orig_line = f"\nFoer: {fmt_price(orig)}"
+    else:
+        orig_line = ""
 
     return (
         f"FORHANDLER TILBUD ({reason})\n\n"

@@ -143,7 +143,8 @@ def apply(items, cfg):
             continue
         if price < min_p or price > max_p:
             continue
-        if pct < min_disc:
+        # Tillad varer fra sale-collections selvom pct=0
+        if pct < min_disc and not item.get("on_sale"):
             continue
 
         sz = detect_size(title)
