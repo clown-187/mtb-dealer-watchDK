@@ -18,6 +18,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Gendan seen.json fra cache
+        uses: actions/cache@v4
+        with:
+          path: seen.json
+          key: seen-${{ github.run_id }}
+          restore-keys: seen-
+
       - name: Installer afhaengigheder
         run: |
           pip install -r requirements.txt
@@ -28,12 +35,3 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-
-      - name: Gem seen.json
-        run: |
-          git config user.email "actions@github.com"
-          git config user.name  "GitHub Actions"
-          git add seen.json
-          git diff --cached --quiet || git commit -m "Update seen state [skip ci]"
-          git pull --rebase origin main
-          git push
